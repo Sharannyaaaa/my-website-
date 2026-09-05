@@ -1,0 +1,93 @@
+name: Daily Finance Marketing Investment Blog
+
+on:
+  schedule:
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-blog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout website
+        uses: actions/checkout@v4
+
+      - name: Generate today's blog
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, datetime
+          from pathlib import Path
+
+          path = Path('blogs.json')
+          posts = json.loads(path.read_text())
+          today = datetime.date.today().isoformat()
+          titles = [p['title'] for p in posts]
+          categories = ['FINANCE', 'MARKETING', 'INVESTING']
+          category = categories[len(posts) % 3]
+
+          prompt = f'''Create one original daily micro-blog for a student portfolio website.
+Date: {today}
+Category: {category}
+Topics: finance, marketing, investing.
+Audience: college students and beginners.
+Style: smart, simple, useful, slightly editorial, never boring.
+Length: 120-220 words.
+Do not give personalised financial advice or tell readers what to buy/sell.
+Avoid repeating any existing title.
+Existing titles: {titles}
+Return ONLY valid JSON with exactly these keys: title, category, excerpt, content.
+The content should be plain text with short paragraphs, no markdown, no HTML, no emojis.'''
+
+          payload = json.dumps({
+            'model': 'gpt-5.6-luna',
+            'input': prompt
+          })
+
+          result = subprocess.run([
+            'curl','-sS','https://api.openai.com/v1/responses',
+            '-H','Content-Type: application/json',
+            '-H',f'Authorization: Bearer {os.environ["OPENAI_API_KEY"]}',
+            '-d',payload
+          ], capture_output=True, text=True, check=True)
+
+          response = json.loads(result.stdout)
+          text = None
+          for item in response.get('output', []):
+            for part in item.get('content', []):
+              if isinstance(part, dict) and part.get('text'):
+                text = part['text']
+                break
+            if text: break
+          if not text:
+            raise RuntimeError('No text returned by the model')
+
+          text = text.strip()
+          if text.startswith('```'):
+            text = text.split('\n',1)[1].rsplit('```',1)[0].strip()
+          post = json.loads(text)
+          post['date'] = today
+          post['category'] = category
+          post = {k: post[k] for k in ['date','category','title','excerpt','content']}
+          posts.insert(0, post)
+          path.write_text(json.dumps(posts, ensure_ascii=False, indent=2) + '\n')
+          PY
+
+      - name: Commit today's blog
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
+        run: |
+          git config user.name "daily-blog-bot"
+          git config user.email "actions@github.com"
+          git add blogs.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Publish daily finance marketing investment blog"
+          git push
+
+      - name: Explain missing API key
+        if: ${{ secrets.OPENAI_API_KEY == '' }}
+        run: echo "Daily blog automation is installed. Add the OPENAI_API_KEY repository secret to enable automatic AI-written posts."
