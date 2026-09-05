@@ -2,7 +2,8 @@ name: Daily Finance Marketing Investment Blog
 
 on:
   schedule:
-    - cron: '30 4 * * *'
+    - cron: '11 11 * * *'
+      timezone: 'Asia/Kolkata'
   workflow_dispatch:
 
 permissions:
@@ -23,15 +24,13 @@ jobs:
           python - <<'PY'
           import json, os, subprocess, datetime
           from pathlib import Path
-
           path = Path('blogs.json')
           posts = json.loads(path.read_text())
           today = datetime.date.today().isoformat()
           titles = [p['title'] for p in posts]
           categories = ['FINANCE', 'MARKETING', 'INVESTING']
           category = categories[len(posts) % 3]
-
-          prompt = f'''Create one original daily micro-blog for a student portfolio website.
+          prompt = f'''Create ONE original daily micro-blog for a student portfolio website.
 Date: {today}
 Category: {category}
 Topics: finance, marketing, investing.
@@ -43,33 +42,18 @@ Avoid repeating any existing title.
 Existing titles: {titles}
 Return ONLY valid JSON with exactly these keys: title, category, excerpt, content.
 The content should be plain text with short paragraphs, no markdown, no HTML, no emojis.'''
-
-          payload = json.dumps({
-            'model': 'gpt-5.6-luna',
-            'input': prompt
-          })
-
-          result = subprocess.run([
-            'curl','-sS','https://api.openai.com/v1/responses',
-            '-H','Content-Type: application/json',
-            '-H',f'Authorization: Bearer {os.environ["OPENAI_API_KEY"]}',
-            '-d',payload
-          ], capture_output=True, text=True, check=True)
-
+          payload = json.dumps({'model': 'gpt-5.6-luna', 'input': prompt})
+          result = subprocess.run(['curl','-sS','https://api.openai.com/v1/responses','-H','Content-Type: application/json','-H',f'Authorization: Bearer {os.environ["OPENAI_API_KEY"]}','-d',payload], capture_output=True, text=True, check=True)
           response = json.loads(result.stdout)
           text = None
           for item in response.get('output', []):
             for part in item.get('content', []):
               if isinstance(part, dict) and part.get('text'):
-                text = part['text']
-                break
+                text = part['text']; break
             if text: break
-          if not text:
-            raise RuntimeError('No text returned by the model')
-
+          if not text: raise RuntimeError('No text returned by the model')
           text = text.strip()
-          if text.startswith('```'):
-            text = text.split('\n',1)[1].rsplit('```',1)[0].strip()
+          if text.startswith('```'): text = text.split('\n',1)[1].rsplit('```',1)[0].strip()
           post = json.loads(text)
           post['date'] = today
           post['category'] = category
